@@ -1,0 +1,19 @@
+# Database
+db.sqlite3
+db.sqlite3-journal
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual Environment
+online_judge/
+
+# Log files
+*.log
+
+# Environment variables
+.env
+
+# macOS
+.DS_Store
