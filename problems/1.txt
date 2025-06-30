@@ -1,0 +1,9 @@
+Add Two Numbers
+
+Given two integers separated by a space, print their sum.
+
+Input:
+Two integers separated by a space.
+
+Output:
+The sum of the two integers.
