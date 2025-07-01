@@ -1,0 +1,14 @@
+# Problem 2: Longest Palindromic Substring
+Given a string s, return the longest palindromic substring in s.
+
+Input:
+A single string s (1 <= len(s) <= 1000)
+
+Output:
+The longest palindromic substring in s. If there are multiple, return any one.
+
+Sample Input:
+babad
+
+Sample Output:
+bab 
