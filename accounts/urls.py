@@ -7,6 +7,6 @@ urlpatterns = [
     path("login/", login_user, name="login-user"),
     path("logout/", logout_user, name="logout-user"),
     path('signup/', SignUpView.as_view(), name='signup'),
-    path('problem/<int:problem_id>/', get_problem, name='get-problem'),
+    path('problem/<uuid:problem_id>/', get_problem, name='get-problem'),
     path('problems/', get_problems, name='get-problems'),
 ]

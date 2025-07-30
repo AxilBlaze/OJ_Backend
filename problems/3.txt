@@ -1,0 +1,18 @@
+# Problem 3: Two Sum
+Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.
+
+Input:
+The first line contains an integer n (number of elements in the array).
+The second line contains n space-separated integers (the array).
+The third line contains the integer target.
+
+Output:
+Output two integers, the indices (0-based) of the two numbers that add up to target. If there are multiple answers, output any one.
+
+Sample Input:
+4
+2 7 11 15
+9
+
+Sample Output:
+0 1 
