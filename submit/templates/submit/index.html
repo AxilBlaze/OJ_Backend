@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Code Submission - Online Judge</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/theme/monokai.min.css" rel="stylesheet">
+    <style>
+        .CodeMirror {
+            height: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .form-container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: #f8f9fa;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="form-container">
+            <div class="header">
+                <h1>🖥️ Code Submission</h1>
+                <p class="text-muted">Submit your code and see it run in real-time</p>
+            </div>
+            
+            <form method="post">
+                {% csrf_token %}
+                
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label for="{{ form.language.id_for_label }}" class="form-label">Programming Language</label>
+                        {{ form.language }}
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="{{ form.code.id_for_label }}" class="form-label">Code</label>
+                    {{ form.code }}
+                </div>
+                
+                <div class="mb-3">
+                    <label for="{{ form.input_data.id_for_label }}" class="form-label">Input Data (Optional)</label>
+                    {{ form.input_data }}
+                </div>
+                
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary btn-lg">
+                        🚀 Run Code
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/clike/clike.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
+    
+    <script>
+        // Initialize CodeMirror for the code textarea
+        var codeTextarea = document.getElementById('{{ form.code.id_for_label }}');
+        var editor = CodeMirror.fromTextArea(codeTextarea, {
+            mode: 'text/x-c++src',
+            theme: 'monokai',
+            lineNumbers: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            indentUnit: 4,
+            tabSize: 4,
+            lineWrapping: true
+        });
+        
+        // Change mode based on language selection
+        document.getElementById('{{ form.language.id_for_label }}').addEventListener('change', function() {
+            var mode = this.value === 'cpp' ? 'text/x-c++src' : 'python';
+            editor.setOption('mode', mode);
+        });
+    </script>
+</body>
+</html> 
