@@ -89,6 +89,54 @@ def api_submit(request):
         }, status=500)
 
 
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_run(request):
+    """REST API endpoint for running code with custom input or test cases"""
+    try:
+        data = json.loads(request.body)
+        language = data.get('language', '').lower()
+        code = data.get('code', '')
+        problem_id = str(data.get('problem_id', ''))
+        custom_input = data.get('custom_input', None)
+
+        # Validate language
+        if language not in ['cpp', 'py']:
+            return JsonResponse({
+                'error': 'Unsupported language. Supported languages: cpp, py'
+            }, status=400)
+
+        # Determine input to use
+        if custom_input and custom_input.strip():
+            # Use custom input provided by user
+            input_data = custom_input
+        else:
+            # Use test case input from file
+            testcase_dir = Path(settings.BASE_DIR) / 'testcases' / problem_id
+            input_file = testcase_dir / f'{problem_id}.in'
+            if not input_file.exists():
+                return JsonResponse({'error': 'Testcase files not found for this problem.'}, status=400)
+            with open(input_file, 'r', encoding='utf-8') as f:
+                input_data = f.read()
+
+        # Run the code with the input
+        user_output = run_code(language, code, input_data)
+
+        return JsonResponse({
+            'output': user_output,
+            'input_used': 'custom' if custom_input and custom_input.strip() else 'testcase'
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'error': 'Invalid JSON data'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'error': f'Server error: {str(e)}'
+        }, status=500)
+
+
 def run_code(language, code, input_data):
     project_path = Path(settings.BASE_DIR)
     directories = ["codes", "inputs", "outputs"]

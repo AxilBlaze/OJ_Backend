@@ -6,4 +6,5 @@ app_name = 'submit'
 urlpatterns = [
     path('', views.submit, name='submit'),
     path('api/submit/', views.api_submit, name='api_submit'),
+    path('api/run/', views.api_run, name='api_run'),
 ] 
