@@ -42,9 +42,9 @@ def api_submit(request):
         # input_data is ignored, we use the test input from file
 
         # Validate language
-        if language not in ['cpp', 'py']:
+        if language not in ['cpp', 'py', 'java']:
             return JsonResponse({
-                'error': 'Unsupported language. Supported languages: cpp, py'
+                'error': 'Unsupported language. Supported languages: cpp, py, java'
             }, status=400)
 
         # Load test input and expected output from files
@@ -101,9 +101,9 @@ def api_run(request):
         custom_input = data.get('custom_input', None)
 
         # Validate language
-        if language not in ['cpp', 'py']:
+        if language not in ['cpp', 'py', 'java']:
             return JsonResponse({
-                'error': 'Unsupported language. Supported languages: cpp, py'
+                'error': 'Unsupported language. Supported languages: cpp, py, java'
             }, status=400)
 
         # Determine input to use
@@ -230,6 +230,61 @@ def run_code(language, code, input_data):
                     if run_result.returncode != 0:
                         return f"Runtime Error:\n{run_result.stderr}"
 
+        elif language == "java":
+            # Java compilation and execution
+            java_compiler = r"C:\Program Files\Java\jdk-24\bin\javac.exe"
+            java_runtime = r"C:\Program Files\Java\jdk-24\bin\java.exe"
+            
+            # Check if Java compiler and runtime exist
+            if not os.path.exists(java_compiler):
+                return "Error: Java compiler (javac) not found at the specified path. Please check your JDK installation."
+            if not os.path.exists(java_runtime):
+                return "Error: Java runtime (java) not found at the specified path. Please check your JDK installation."
+            
+            # For Java, we need to ensure the class name matches the file name
+            # Extract class name from the code or use a default
+            class_name = "Main"  # Default class name
+            if "class" in code and "public class" in code:
+                # Try to extract class name from the code
+                lines = code.split('\n')
+                for line in lines:
+                    if line.strip().startswith('public class'):
+                        class_name = line.strip().split('public class')[1].split()[0].strip()
+                        break
+            
+            # Create Java file with proper class name
+            java_file_name = f"{class_name}.java"
+            java_file_path = codes_dir / java_file_name
+            
+            # Write the Java code to file
+            with open(java_file_path, "w") as java_file:
+                java_file.write(code)
+            
+            # Compile Java code
+            compile_result = subprocess.run(
+                [java_compiler, str(java_file_path)],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if compile_result.returncode != 0:
+                return f"Compilation Error:\n{compile_result.stderr}"
+            
+            # Run the compiled Java program
+            class_file_path = codes_dir / f"{class_name}.class"
+            with open(input_file_path, "r") as input_file:
+                with open(output_file_path, "w") as output_file:
+                    run_result = subprocess.run(
+                        [java_runtime, "-cp", str(codes_dir), class_name],
+                        stdin=input_file,
+                        stdout=output_file,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=5
+                    )
+                    if run_result.returncode != 0:
+                        return f"Runtime Error:\n{run_result.stderr}"
+
         # Read the output from the output file
         with open(output_file_path, "r") as output_file:
             output_data = output_file.read()
@@ -243,6 +298,8 @@ def run_code(language, code, input_data):
             return "Error: C++ compiler (g++) not found. Please install MinGW or another C++ compiler."
         elif "python" in str(e) or "py" in str(e):
             return "Error: Python interpreter not found. Please install Python and ensure it's in your PATH."
+        elif "javac" in str(e) or "java" in str(e):
+            return "Error: Java compiler or runtime not found. Please check your JDK installation at C:\\Program Files\\Java\\jdk-24\\bin"
         else:
             return f"Error: Required program not found - {str(e)}"
     except Exception as e:
@@ -258,5 +315,20 @@ def run_code(language, code, input_data):
                 output_file_path.unlink()
             if language == "cpp" and executable_path.exists():
                 executable_path.unlink()
+            if language == "java":
+                # Clean up Java files
+                class_name = "Main"
+                if "class" in code and "public class" in code:
+                    lines = code.split('\n')
+                    for line in lines:
+                        if line.strip().startswith('public class'):
+                            class_name = line.strip().split('public class')[1].split()[0].strip()
+                            break
+                java_file_path = codes_dir / f"{class_name}.java"
+                class_file_path = codes_dir / f"{class_name}.class"
+                if java_file_path.exists():
+                    java_file_path.unlink()
+                if class_file_path.exists():
+                    class_file_path.unlink()
         except:
             pass  # Ignore cleanup errors
