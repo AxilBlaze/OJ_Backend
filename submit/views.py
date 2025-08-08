@@ -232,14 +232,16 @@ def run_code(language, code, input_data):
 
         elif language == "java":
             # Java compilation and execution
-            java_compiler = r"C:\Program Files\Java\jdk-24\bin\javac.exe"
-            java_runtime = r"C:\Program Files\Java\jdk-24\bin\java.exe"
+            # Use system PATH for Docker environment, fallback to Windows path for local development
+            java_compiler = "javac"
+            java_runtime = "java"
             
             # Check if Java compiler and runtime exist
-            if not os.path.exists(java_compiler):
-                return "Error: Java compiler (javac) not found at the specified path. Please check your JDK installation."
-            if not os.path.exists(java_runtime):
-                return "Error: Java runtime (java) not found at the specified path. Please check your JDK installation."
+            try:
+                subprocess.run([java_compiler, "-version"], capture_output=True, text=True, timeout=2)
+                subprocess.run([java_runtime, "-version"], capture_output=True, text=True, timeout=2)
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                return "Error: Java compiler or runtime not found. Please check your JDK installation."
             
             # For Java, we need to ensure the class name matches the file name
             # Extract class name from the code or use a default
