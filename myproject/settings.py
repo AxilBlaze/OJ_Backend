@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +21,26 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-+5+)y2rly^x)uwh7xt)rq(!9te3t(@!&%isocc_aeto)j8_5et"
+SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS: list[str] = []
+
+# Allow Render-provided hostname and additional comma-separated hosts via env
+render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if render_hostname:
+    ALLOWED_HOSTS.append(render_hostname)
+
+env_allowed_hosts = os.environ.get("ALLOWED_HOSTS")
+if env_allowed_hosts:
+    ALLOWED_HOSTS.extend([
+        host.strip() for host in env_allowed_hosts.split(",") if host.strip()
+    ])
+
+if DEBUG and not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 
 # Application definition
@@ -45,6 +60,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -120,7 +136,12 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Ensure Django knows it's behind a proxy (Render)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -133,11 +154,22 @@ AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend', # Keep the default backend as a fallback
 ]
 
-# Allow frontend to connect
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173", # The default port for Vite React dev server
-    "http://127.0.0.1:5173",
-]
+# Allow frontend to connect (read from env, comma-separated)
+_env_cors = os.environ.get("CORS_ALLOWED_ORIGINS")
+if _env_cors:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _env_cors.split(",") if o.strip()]
+else:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+# CSRF trusted origins for admin and session-based endpoints
+_env_csrf = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _env_csrf.split(",") if o.strip()]
+if render_hostname:
+    # Must include scheme
+    CSRF_TRUSTED_ORIGINS.append(f"https://{render_hostname}")
 
 CORS_ALLOW_CREDENTIALS = True
 

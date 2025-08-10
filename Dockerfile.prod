@@ -56,8 +56,8 @@ USER app
 # Expose port
 EXPOSE 8000
 
-# Run the application with Gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120", "myproject.wsgi:application"]
+# Run migrations, collect static, and start Gunicorn on the provided PORT (Render sets $PORT)
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:$PORT --workers 4 --timeout 120 myproject.wsgi:application"]
 
 
 
