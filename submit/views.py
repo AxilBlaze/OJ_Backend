@@ -10,6 +10,79 @@ import uuid
 import subprocess
 from pathlib import Path
 from .models import CodeSubmission
+import sys
+import platform
+
+TIME_LIMIT_SECONDS = 2
+COMPILE_TIME_LIMIT_SECONDS = 10
+MEMORY_LIMIT_MB = 256
+OUTPUT_LIMIT_BYTES = 1_048_576  # 1 MB
+
+def _posix_limit_preexec():
+    """Return a preexec_fn that sets CPU, address space, and file size limits on POSIX.
+    Returns None on non-POSIX systems.
+    """
+    if os.name != 'posix':
+        return None
+    try:
+        import resource
+    except Exception:
+        return None
+
+    def set_limits():
+        # CPU time
+        resource.setrlimit(resource.RLIMIT_CPU, (TIME_LIMIT_SECONDS, TIME_LIMIT_SECONDS))
+        # Virtual memory/address space (bytes)
+        address_space_bytes = MEMORY_LIMIT_MB * 1024 * 1024
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (address_space_bytes, address_space_bytes))
+        except (ValueError, OSError):
+            # Fallback to data segment limit if AS not available
+            try:
+                resource.setrlimit(resource.RLIMIT_DATA, (address_space_bytes, address_space_bytes))
+            except Exception:
+                pass
+        # Output file size
+        try:
+            resource.setrlimit(resource.RLIMIT_FSIZE, (OUTPUT_LIMIT_BYTES, OUTPUT_LIMIT_BYTES))
+        except Exception:
+            pass
+        # No core dumps
+        try:
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        except Exception:
+            pass
+
+    return set_limits
+
+def _classify_error(run_result, stderr_text):
+    """Classify error type based on return code and stderr."""
+    # Default
+    error_type = 'rte'
+    message = 'Runtime Error'
+
+    # Check signals on POSIX
+    if os.name == 'posix' and run_result is not None and run_result.returncode is not None:
+        rc = run_result.returncode
+        if rc < 0:
+            sig = -rc
+            # Likely memory or killed
+            if sig in (9,):  # SIGKILL
+                return 'mle', 'Memory Limit Exceeded'
+            if sig in (11,):  # SIGSEGV
+                return 'mle', 'Memory Limit Exceeded'
+            if sig in (6,):  # SIGABRT
+                return 'mle', 'Memory Limit Exceeded'
+
+    lower = (stderr_text or '').lower()
+    if 'memoryerror' in lower:
+        return 'mle', 'Memory Limit Exceeded'
+    if 'outofmemoryerror' in lower:
+        return 'mle', 'Memory Limit Exceeded'
+    if 'bad_alloc' in lower:
+        return 'mle', 'Memory Limit Exceeded'
+
+    return error_type, message
 
 
 def submit(request):
@@ -72,10 +145,24 @@ def api_submit(request):
             output_data=user_output
         )
 
+        # If special verdict markers are present, pass them through
+        verdict = None
+        if user_output.startswith('[TLE]'):
+            verdict = 'TLE'
+        elif user_output.startswith('[MLE]'):
+            verdict = 'MLE'
+        elif user_output.startswith('[RTE]'):
+            verdict = 'RTE'
+        elif user_output.startswith('[CE]'):
+            verdict = 'CE'
+        elif user_output.startswith('[OLE]'):
+            verdict = 'OLE'
+
         return JsonResponse({
-            'success': is_success,
+            'success': is_success if verdict is None else False,
             'output': user_output,
             'expected_output': expected_output,
+            'verdict': verdict,
             'submission_id': submission.id
         })
 
@@ -122,8 +209,22 @@ def api_run(request):
         # Run the code with the input
         user_output = run_code(language, code, input_data)
 
+        verdict = None
+        if isinstance(user_output, str) and user_output.startswith('['):
+            if user_output.startswith('[TLE]'):
+                verdict = 'TLE'
+            elif user_output.startswith('[MLE]'):
+                verdict = 'MLE'
+            elif user_output.startswith('[RTE]'):
+                verdict = 'RTE'
+            elif user_output.startswith('[CE]'):
+                verdict = 'CE'
+            elif user_output.startswith('[OLE]'):
+                verdict = 'OLE'
+
         return JsonResponse({
             'output': user_output,
+            'verdict': verdict,
             'input_used': 'custom' if custom_input and custom_input.strip() else 'testcase'
         })
 
@@ -173,26 +274,32 @@ def run_code(language, code, input_data):
         if language == "cpp":
             executable_path = codes_dir / f"{unique}.exe"  # Windows executable extension
             compile_result = subprocess.run(
-                ["g++", str(code_file_path), "-o", str(executable_path)],
+                ["g++", str(code_file_path), "-O2", "-std=c++17", "-static", "-o", str(executable_path)],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=COMPILE_TIME_LIMIT_SECONDS
             )
             if compile_result.returncode != 0:
-                return f"Compilation Error:\n{compile_result.stderr}"
+                return f"[CE] Compilation Error:\n{compile_result.stderr}"
             
             with open(input_file_path, "r") as input_file:
                 with open(output_file_path, "w") as output_file:
-                    run_result = subprocess.run(
-                        [str(executable_path)],
-                        stdin=input_file,
-                        stdout=output_file,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        timeout=5
-                    )
+                    run_result = None
+                    try:
+                        run_result = subprocess.run(
+                            [str(executable_path)],
+                            stdin=input_file,
+                            stdout=output_file,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=TIME_LIMIT_SECONDS,
+                            preexec_fn=_posix_limit_preexec()
+                        )
+                    except subprocess.TimeoutExpired:
+                        return "[TLE] Time Limit Exceeded"
                     if run_result.returncode != 0:
-                        return f"Runtime Error:\n{run_result.stderr}"
+                        err_type, msg = _classify_error(run_result, run_result.stderr)
+                        return f"[{err_type.upper()}] {msg}:\n{run_result.stderr}"
                         
         elif language == "py":
             # Try different Python commands for Windows
@@ -214,21 +321,26 @@ def run_code(language, code, input_data):
                     continue
             
             if not python_found:
-                return "Error: Python interpreter not found. Please install Python and ensure it's in your PATH."
+                return "[RTE] Error: Python interpreter not found. Please install Python and ensure it's in your PATH."
             
             # Code for executing Python script
             with open(input_file_path, "r") as input_file:
                 with open(output_file_path, "w") as output_file:
-                    run_result = subprocess.run(
-                        [python_cmd, str(code_file_path)],
-                        stdin=input_file,
-                        stdout=output_file,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        timeout=5
-                    )
+                    try:
+                        run_result = subprocess.run(
+                            [python_cmd, str(code_file_path)],
+                            stdin=input_file,
+                            stdout=output_file,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=TIME_LIMIT_SECONDS,
+                            preexec_fn=_posix_limit_preexec()
+                        )
+                    except subprocess.TimeoutExpired:
+                        return "[TLE] Time Limit Exceeded"
                     if run_result.returncode != 0:
-                        return f"Runtime Error:\n{run_result.stderr}"
+                        err_type, msg = _classify_error(run_result, run_result.stderr)
+                        return f"[{err_type.upper()}] {msg}:\n{run_result.stderr}"
 
         elif language == "java":
             # Java compilation and execution
@@ -241,7 +353,7 @@ def run_code(language, code, input_data):
                 subprocess.run([java_compiler, "-version"], capture_output=True, text=True, timeout=2)
                 subprocess.run([java_runtime, "-version"], capture_output=True, text=True, timeout=2)
             except (subprocess.TimeoutExpired, FileNotFoundError):
-                return "Error: Java compiler or runtime not found. Please check your JDK installation."
+                return "[RTE] Error: Java compiler or runtime not found. Please check your JDK installation."
             
             # For Java, we need to ensure the class name matches the file name
             # Extract class name from the code or use a default
@@ -267,45 +379,53 @@ def run_code(language, code, input_data):
                 [java_compiler, str(java_file_path)],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=COMPILE_TIME_LIMIT_SECONDS
             )
             if compile_result.returncode != 0:
-                return f"Compilation Error:\n{compile_result.stderr}"
+                return f"[CE] Compilation Error:\n{compile_result.stderr}"
             
             # Run the compiled Java program
             class_file_path = codes_dir / f"{class_name}.class"
             with open(input_file_path, "r") as input_file:
                 with open(output_file_path, "w") as output_file:
-                    run_result = subprocess.run(
-                        [java_runtime, "-cp", str(codes_dir), class_name],
-                        stdin=input_file,
-                        stdout=output_file,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        timeout=5
-                    )
+                    try:
+                        run_result = subprocess.run(
+                            [java_runtime, "-cp", str(codes_dir), class_name],
+                            stdin=input_file,
+                            stdout=output_file,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=TIME_LIMIT_SECONDS,
+                            preexec_fn=_posix_limit_preexec()
+                        )
+                    except subprocess.TimeoutExpired:
+                        return "[TLE] Time Limit Exceeded"
                     if run_result.returncode != 0:
-                        return f"Runtime Error:\n{run_result.stderr}"
+                        err_type, msg = _classify_error(run_result, run_result.stderr)
+                        return f"[{err_type.upper()}] {msg}:\n{run_result.stderr}"
 
         # Read the output from the output file
         with open(output_file_path, "r") as output_file:
             output_data = output_file.read()
 
+        # Enforce output size limit (OLE)
+        if len(output_data.encode('utf-8')) > OUTPUT_LIMIT_BYTES:
+            return "[OLE] Output Limit Exceeded"
         return output_data if output_data else "Program executed successfully (no output)"
 
     except subprocess.TimeoutExpired:
-        return "Execution timeout: Program took too long to run"
+        return "[TLE] Time Limit Exceeded"
     except FileNotFoundError as e:
         if "g++" in str(e):
-            return "Error: C++ compiler (g++) not found. Please install MinGW or another C++ compiler."
+            return "[RTE] Error: C++ compiler (g++) not found. Please install MinGW or another C++ compiler."
         elif "python" in str(e) or "py" in str(e):
-            return "Error: Python interpreter not found. Please install Python and ensure it's in your PATH."
+            return "[RTE] Error: Python interpreter not found. Please install Python and ensure it's in your PATH."
         elif "javac" in str(e) or "java" in str(e):
-            return "Error: Java compiler or runtime not found. Please check your JDK installation at C:\\Program Files\\Java\\jdk-24\\bin"
+            return "[RTE] Error: Java compiler or runtime not found. Please check your JDK installation at C:\\Program Files\\Java\\jdk-24\\bin"
         else:
-            return f"Error: Required program not found - {str(e)}"
+            return f"[RTE] Error: Required program not found - {str(e)}"
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"[RTE] Error: {str(e)}"
     finally:
         # Clean up temporary files
         try:

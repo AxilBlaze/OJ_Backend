@@ -9,6 +9,8 @@ from .serializers import UserSerializer
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from .models import Problem, TestCase
+from django.conf import settings
+from pathlib import Path
 
 # Create your views here.
 
@@ -113,27 +115,47 @@ def get_problem(request, problem_id):
     try:
         problem = Problem.objects.get(id=problem_id)
         testcase = TestCase.objects.filter(problem=problem).first()
-        # Read the problem description from the file
+        # Prefer file description; fallback to DB field
         description = ""
-        if problem.problem_file:
-            with open(problem.problem_file, 'r', encoding='utf-8') as f:
-                description = f.read()
-        # Read sample input/output from files
+        try:
+            if problem.problem_file:
+                with open(problem.problem_file, 'r', encoding='utf-8') as f:
+                    description = f.read()
+        except Exception:
+            description = ""
+        if not description:
+            description = problem.description or ""
+        # Prefer TestCase files; fallback to filesystem testcases/<uuid>/<uuid>.in|.out
         sample_input = ""
         sample_output = ""
-        if testcase:
-            if testcase.input_file:
+        try:
+            if testcase and testcase.input_file:
                 with open(testcase.input_file, 'r', encoding='utf-8') as f:
                     sample_input = f.read()
-            if testcase.output_file:
+            if testcase and testcase.output_file:
                 with open(testcase.output_file, 'r', encoding='utf-8') as f:
                     sample_output = f.read()
+        except Exception:
+            pass
+        if not sample_input or not sample_output:
+            tc_dir = Path(settings.BASE_DIR) / 'testcases' / str(problem.id)
+            in_path = tc_dir / f"{problem.id}.in"
+            out_path = tc_dir / f"{problem.id}.out"
+            try:
+                if in_path.exists() and not sample_input:
+                    sample_input = in_path.read_text(encoding='utf-8')
+                if out_path.exists() and not sample_output:
+                    sample_output = out_path.read_text(encoding='utf-8')
+            except Exception:
+                pass
         return Response({
             'id': problem.id,
             'title': problem.title,
             'description': description,
             'sample_input': sample_input,
             'sample_output': sample_output,
+            'difficulty': problem.difficulty,
+            'tags': problem.tags.split(',') if problem.tags else [],
         })
     except Problem.DoesNotExist:
         return Response({'error': 'Problem not found'}, status=404)
