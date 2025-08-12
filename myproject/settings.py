@@ -24,7 +24,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get("SECRET_KEY", "insecure-dev-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
+# Treat common truthy values as True ("1", "true", "yes", "on")
+DEBUG = os.environ.get("DEBUG", "true").strip().lower() in ("1", "true", "yes", "on")
 
 ALLOWED_HOSTS: list[str] = []
 
@@ -39,8 +40,9 @@ if env_allowed_hosts:
         host.strip() for host in env_allowed_hosts.split(",") if host.strip()
     ])
 
-if DEBUG and not ALLOWED_HOSTS:
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+# In dev/docker, allow common hosts if none provided
+if not ALLOWED_HOSTS:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
 
 
 # Application definition
@@ -92,6 +94,7 @@ WSGI_APPLICATION = "myproject.wsgi.application"
 
 
 # Database
+# Prefer DATABASE_URL (e.g., Render Managed Postgres). Fallback to SQLite.
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
 DATABASES = {
@@ -100,6 +103,24 @@ DATABASES = {
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
+
+_database_url = os.environ.get("DATABASE_URL")
+if _database_url:
+    try:
+        import dj_database_url  # type: ignore
+        DATABASES["default"] = dj_database_url.parse(
+            _database_url,
+            conn_max_age=600,
+            ssl_require=os.environ.get("DB_SSL_REQUIRE", "true").lower() == "true",
+        )
+    except Exception:
+        # If parsing fails for any reason, keep SQLite fallback
+        pass
+else:
+    # Optional: override SQLite location via env if a persistent disk is mounted
+    _sqlite_path = os.environ.get("SQLITE_PATH")
+    if _sqlite_path:
+        DATABASES["default"]["NAME"] = _sqlite_path
 
 
 # Password validation
@@ -163,6 +184,11 @@ else:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+
+# Optional: allow origin regexes via env for preview URLs (e.g., Vercel)
+_env_cors_regexes = os.environ.get("CORS_ALLOWED_ORIGIN_REGEXES")
+if _env_cors_regexes:
+    CORS_ALLOWED_ORIGIN_REGEXES = [r.strip() for r in _env_cors_regexes.split(",") if r.strip()]
 
 # CSRF trusted origins for admin and session-based endpoints
 _env_csrf = os.environ.get("CSRF_TRUSTED_ORIGINS", "")

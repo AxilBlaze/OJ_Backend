@@ -13,12 +13,12 @@ from .models import CodeSubmission
 import sys
 import platform
 
-TIME_LIMIT_SECONDS = 2
+TIME_LIMIT_SECONDS = 5
 COMPILE_TIME_LIMIT_SECONDS = 10
 MEMORY_LIMIT_MB = 256
 OUTPUT_LIMIT_BYTES = 1_048_576  # 1 MB
 
-def _posix_limit_preexec():
+def _posix_limit_preexec(memory_limit_mb: int = MEMORY_LIMIT_MB):
     """Return a preexec_fn that sets CPU, address space, and file size limits on POSIX.
     Returns None on non-POSIX systems.
     """
@@ -33,7 +33,7 @@ def _posix_limit_preexec():
         # CPU time
         resource.setrlimit(resource.RLIMIT_CPU, (TIME_LIMIT_SECONDS, TIME_LIMIT_SECONDS))
         # Virtual memory/address space (bytes)
-        address_space_bytes = MEMORY_LIMIT_MB * 1024 * 1024
+        address_space_bytes = memory_limit_mb * 1024 * 1024
         try:
             resource.setrlimit(resource.RLIMIT_AS, (address_space_bytes, address_space_bytes))
         except (ValueError, OSError):
@@ -194,17 +194,21 @@ def api_run(request):
             }, status=400)
 
         # Determine input to use
-        if custom_input and custom_input.strip():
-            # Use custom input provided by user
+        if custom_input is not None:
+            # Use custom input provided by user (allow empty string for public playground)
             input_data = custom_input
         else:
-            # Use test case input from file
-            testcase_dir = Path(settings.BASE_DIR) / 'testcases' / problem_id
-            input_file = testcase_dir / f'{problem_id}.in'
-            if not input_file.exists():
-                return JsonResponse({'error': 'Testcase files not found for this problem.'}, status=400)
-            with open(input_file, 'r', encoding='utf-8') as f:
-                input_data = f.read()
+            if problem_id:
+                # Use test case input from file when problem_id is supplied and no custom input
+                testcase_dir = Path(settings.BASE_DIR) / 'testcases' / problem_id
+                input_file = testcase_dir / f'{problem_id}.in'
+                if not input_file.exists():
+                    return JsonResponse({'error': 'Testcase files not found for this problem.'}, status=400)
+                with open(input_file, 'r', encoding='utf-8') as f:
+                    input_data = f.read()
+            else:
+                # No problem and no custom input -> run with empty stdin
+                input_data = ""
 
         # Run the code with the input
         user_output = run_code(language, code, input_data)
@@ -274,7 +278,7 @@ def run_code(language, code, input_data):
         if language == "cpp":
             executable_path = codes_dir / f"{unique}.exe"  # Windows executable extension
             compile_result = subprocess.run(
-                ["g++", str(code_file_path), "-O2", "-std=c++17", "-static", "-o", str(executable_path)],
+                ["g++", str(code_file_path), "-O2", "-std=c++17", "-o", str(executable_path)],
                 capture_output=True,
                 text=True,
                 timeout=COMPILE_TIME_LIMIT_SECONDS
@@ -293,7 +297,7 @@ def run_code(language, code, input_data):
                             stderr=subprocess.PIPE,
                             text=True,
                             timeout=TIME_LIMIT_SECONDS,
-                            preexec_fn=_posix_limit_preexec()
+                            preexec_fn=_posix_limit_preexec(MEMORY_LIMIT_MB)
                         )
                     except subprocess.TimeoutExpired:
                         return "[TLE] Time Limit Exceeded"
@@ -334,7 +338,7 @@ def run_code(language, code, input_data):
                             stderr=subprocess.PIPE,
                             text=True,
                             timeout=TIME_LIMIT_SECONDS,
-                            preexec_fn=_posix_limit_preexec()
+                            preexec_fn=_posix_limit_preexec(MEMORY_LIMIT_MB)
                         )
                     except subprocess.TimeoutExpired:
                         return "[TLE] Time Limit Exceeded"
@@ -376,7 +380,7 @@ def run_code(language, code, input_data):
             
             # Compile Java code
             compile_result = subprocess.run(
-                [java_compiler, str(java_file_path)],
+                [java_compiler, "-encoding", "UTF-8", str(java_file_path)],
                 capture_output=True,
                 text=True,
                 timeout=COMPILE_TIME_LIMIT_SECONDS
@@ -389,14 +393,15 @@ def run_code(language, code, input_data):
             with open(input_file_path, "r") as input_file:
                 with open(output_file_path, "w") as output_file:
                     try:
+                        java_args = [java_runtime, "-Xms32m", "-Xmx256m", "-cp", str(codes_dir), class_name]
                         run_result = subprocess.run(
-                            [java_runtime, "-cp", str(codes_dir), class_name],
+                            java_args,
                             stdin=input_file,
                             stdout=output_file,
                             stderr=subprocess.PIPE,
                             text=True,
                             timeout=TIME_LIMIT_SECONDS,
-                            preexec_fn=_posix_limit_preexec()
+                            cwd=str(codes_dir)
                         )
                     except subprocess.TimeoutExpired:
                         return "[TLE] Time Limit Exceeded"
