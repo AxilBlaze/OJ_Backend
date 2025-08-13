@@ -180,24 +180,39 @@ _env_cors = os.environ.get("CORS_ALLOWED_ORIGINS")
 if _env_cors:
     CORS_ALLOWED_ORIGINS = [o.strip() for o in _env_cors.split(",") if o.strip()]
 else:
+    # Defaults: local dev + production Vercel frontend
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://the-oj-project.vercel.app",
     ]
 
 # Optional: allow origin regexes via env for preview URLs (e.g., Vercel)
 _env_cors_regexes = os.environ.get("CORS_ALLOWED_ORIGIN_REGEXES")
 if _env_cors_regexes:
     CORS_ALLOWED_ORIGIN_REGEXES = [r.strip() for r in _env_cors_regexes.split(",") if r.strip()]
+else:
+    # Allow all Vercel preview deployments
+    CORS_ALLOWED_ORIGIN_REGEXES = [r"^https:\/\/.*\\.vercel\\.app$"]
 
 # CSRF trusted origins for admin and session-based endpoints
 _env_csrf = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in _env_csrf.split(",") if o.strip()]
+if not CSRF_TRUSTED_ORIGINS:
+    # Include the production frontend domain for cookie-based endpoints/admin if used
+    CSRF_TRUSTED_ORIGINS = [
+        "https://the-oj-project.vercel.app",
+    ]
 if render_hostname:
     # Must include scheme
     CSRF_TRUSTED_ORIGINS.append(f"https://{render_hostname}")
 
 CORS_ALLOW_CREDENTIALS = True
+
+# Harden cookies in production
+if not DEBUG:
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_SECURE = True
 
 # REST Framework configuration
 REST_FRAMEWORK = {
