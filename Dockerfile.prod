@@ -1,5 +1,5 @@
-# Use Python 3.11 slim image as base
-FROM python:3.11-slim
+# Use Python 3.11 on Debian bookworm to ensure OpenJDK 17 availability
+FROM python:3.11-slim-bookworm
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -9,27 +9,17 @@ ENV DJANGO_SETTINGS_MODULE=myproject.settings
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies including compilers
+# Install system dependencies including compilers and OpenJDK (from Debian repos)
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     g++ \
     gcc \
     make \
     wget \
     curl \
     gnupg \
-    software-properties-common \
+    openjdk-17-jdk \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Java JDK
-RUN wget -qO - https://packages.adoptium.net/artifactory/api/gpg/key/public | apt-key add - \
-    && echo "deb https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print$2}' /etc/os-release) main" | tee /etc/apt/sources.list.d/adoptium.list \
-    && apt-get update \
-    && apt-get install -y temurin-17-jdk \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set JAVA_HOME
-ENV JAVA_HOME=/usr/lib/jvm/temurin-17-jdk-amd64
-ENV PATH=$PATH:$JAVA_HOME/bin
 
 # Create a non-root user
 RUN useradd --create-home --shell /bin/bash app
@@ -56,7 +46,10 @@ USER app
 # Expose port
 EXPOSE 8000
 
-# Run migrations, collect static, and start Gunicorn on the provided PORT (Render sets $PORT)
+# Default port for runtime environments that do not inject PORT
+ENV PORT=8000
+
+# Run migrations, collect static, and start Gunicorn
 CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn --bind 0.0.0.0:$PORT --workers 4 --timeout 120 myproject.wsgi:application"]
 
 
